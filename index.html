@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Keuangan Pribadi</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans" x-data="financeApp()">
+
+    <div x-show="!isLoggedIn" x-cloak class="flex items-center justify-center min-h-screen">
+        <div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
+            <h2 class="text-2xl font-bold text-center mb-6 text-gray-800">Login Dashboard</h2>
+            <form @submit.prevent="login">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Username</label>
+                    <input x-model="loginForm.username" type="text" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="admin">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Password</label>
+                    <input x-model="loginForm.password" type="password" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="admin123">
+                </div>
+                <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded hover:bg-blue-700 transition">
+                    Masuk
+                </button>
+                <p x-show="loginError" class="text-red-500 text-sm text-center mt-3" x-text="loginError"></p>
+            </form>
+        </div>
+    </div>
+
+    <div x-show="isLoggedIn" x-cloak>
+        <nav class="bg-blue-600 text-white p-4 shadow-md">
+            <div class="container mx-auto flex justify-between items-center">
+                <h1 class="text-xl font-bold">💰 Keuangan Syukur</h1>
+                <button @click="logout" class="bg-red-500 hover:bg-red-600 px-4 py-2 rounded text-sm">Logout</button>
+            </div>
+        </nav>
+
+        <main class="container mx-auto p-4 md:p-6">
+            
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-semibold text-gray-700">Ringkasan</h2>
+                <button @click="fetchAllData" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded flex items-center gap-2">
+                    🔄 Refresh Data
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-lg shadow border-l-4 border-green-500">
+                    <p class="text-gray-500 text-sm uppercase">Total Pemasukan</p>
+                    <p class="text-2xl font-bold text-green-600" x-text="formatRupiah(summary.total_income)"></p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow border-l-4 border-red-500">
+                    <p class="text-gray-500 text-sm uppercase">Total Pengeluaran</p>
+                    <p class="text-2xl font-bold text-red-600" x-text="formatRupiah(summary.total_expense)"></p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow border-l-4 border-blue-500">
+                    <p class="text-gray-500 text-sm uppercase">Sisa Saldo</p>
+                    <p class="text-2xl font-bold text-blue-600" x-text="formatRupiah(summary.balance)"></p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-lg shadow lg:col-span-2">
+                    <h3 class="font-bold text-gray-700 mb-4">Grafik 30 Hari Terakhir</h3>
+                    <div class="relative h-64">
+                        <canvas id="dailyChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="font-bold text-gray-700 mb-4">Pengeluaran per Kategori</h3>
+                    <div class="overflow-y-auto h-64 space-y-3">
+                        <template x-for="cat in categories" :key="cat.category + cat.type">
+                            <div class="flex justify-between items-center p-2 hover:bg-gray-50 rounded border-b">
+                                <div>
+                                    <span class="font-medium text-gray-700" x-text="cat.category"></span>
+                                    <span class="text-xs px-2 py-0.5 rounded ml-2" 
+                                          :class="cat.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                          x-text="cat.type"></span>
+                                </div>
+                                <span class="font-bold text-gray-600" x-text="formatRupiah(cat.total)"></span>
+                            </div>
+                        </template>
+                        <div x-show="categories.length === 0" class="text-center text-gray-400 mt-10">Belum ada data</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="p-4 border-b bg-gray-50 flex justify-between items-center">
+                    <h3 class="font-bold text-gray-700">Riwayat Transaksi</h3>
+                    
+                    <select x-model="filterType" @change="fetchTransactions" class="border rounded px-2 py-1 text-sm">
+                        <option value="">Semua Tipe</option>
+                        <option value="income">Pemasukan</option>
+                        <option value="expense">Pengeluaran</option>
+                    </select>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 text-gray-600 text-sm uppercase">
+                                <th class="p-4 border-b">Tanggal</th>
+                                <th class="p-4 border-b">Kategori</th>
+                                <th class="p-4 border-b">Catatan</th>
+                                <th class="p-4 border-b text-right">Jumlah</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-gray-700">
+                            <template x-for="trx in transactions" :key="trx.id">
+                                <tr class="hover:bg-gray-50 transition border-b">
+                                    <td class="p-4 text-sm" x-text="formatDate(trx.created_at)"></td>
+                                    <td class="p-4">
+                                        <span class="px-2 py-1 rounded text-xs font-bold uppercase tracking-wide"
+                                              :class="trx.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                                              x-text="trx.category">
+                                        </span>
+                                    </td>
+                                    <td class="p-4 text-sm text-gray-500" x-text="trx.note"></td>
+                                    <td class="p-4 text-right font-medium" 
+                                        :class="trx.type === 'income' ? 'text-green-600' : 'text-red-600'"
+                                        x-text="(trx.type === 'expense' ? '- ' : '+ ') + formatRupiah(trx.amount)">
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="transactions.length === 0">
+                                <td colspan="4" class="p-8 text-center text-gray-400">Tidak ada transaksi ditemukan.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:8080"; // Ganti jika port beda
+
+        function financeApp() {
+            return {
+                isLoggedIn: false,
+                token: localStorage.getItem('jwt_token') || '',
+                loginForm: { username: '', password: '' },
+                loginError: '',
+                
+                // Data Dashboard
+                summary: { total_income: 0, total_expense: 0, balance: 0 },
+                transactions: [],
+                categories: [],
+                filterType: '',
+                chartInstance: null,
+
+                init() {
+                    if (this.token) {
+                        this.isLoggedIn = true;
+                        this.fetchAllData();
+                    }
+                },
+
+                // --- AUTH ---
+                async login() {
+                    try {
+                        const res = await fetch(`${API_URL}/login`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.loginForm)
+                        });
+                        const data = await res.json();
+                        
+                        if (res.ok) {
+                            this.token = data.token;
+                            localStorage.setItem('jwt_token', data.token);
+                            this.isLoggedIn = true;
+                            this.loginError = '';
+                            this.fetchAllData();
+                        } else {
+                            this.loginError = data.error || 'Login gagal';
+                        }
+                    } catch (err) {
+                        this.loginError = 'Tidak bisa konek ke server';
+                    }
+                },
+
+                logout() {
+                    this.token = '';
+                    localStorage.removeItem('jwt_token');
+                    this.isLoggedIn = false;
+                    this.loginForm = { username: '', password: '' };
+                },
+
+                // --- DATA FETCHING ---
+                async fetchWithAuth(endpoint) {
+                    const res = await fetch(`${API_URL}${endpoint}`, {
+                        headers: { 'Authorization': `Bearer ${this.token}` }
+                    });
+                    if (res.status === 401) {
+                        this.logout(); // Token expired
+                        return null;
+                    }
+                    return await res.json();
+                },
+
+                async fetchAllData() {
+                    await Promise.all([
+                        this.fetchSummary(),
+                        this.fetchTransactions(),
+                        this.fetchCategories(),
+                        this.fetchChart()
+                    ]);
+                },
+
+                async fetchSummary() {
+                    const data = await this.fetchWithAuth('/api/summary');
+                    if(data) this.summary = data;
+                },
+
+                async fetchTransactions() {
+                    let url = '/api/transactions';
+                    if (this.filterType) url += `?type=${this.filterType}`;
+                    
+                    const res = await this.fetchWithAuth(url);
+                    if(res && res.data) this.transactions = res.data;
+                    else this.transactions = [];
+                },
+
+                async fetchCategories() {
+                    const res = await this.fetchWithAuth('/api/categories');
+                    if(res && res.data) {
+                        // Urutkan dari yg terbesar
+                        this.categories = res.data.sort((a, b) => b.total - a.total);
+                    }
+                },
+
+                async fetchChart() {
+                    const res = await this.fetchWithAuth('/api/chart/daily');
+                    if (res && res.data) {
+                        this.renderChart(res.data);
+                    }
+                },
+
+                // --- UI HELPERS ---
+                formatRupiah(angka) {
+                    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(angka);
+                },
+
+                formatDate(dateString) {
+                    const options = { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+                    return new Date(dateString).toLocaleDateString('id-ID', options);
+                },
+
+                // --- CHART JS LOGIC ---
+                renderChart(data) {
+                    const ctx = document.getElementById('dailyChart').getContext('2d');
+                    
+                    // Siapkan label (tanggal) dan data
+                    const labels = data.map(d => this.formatDate(d.date).split(',')[0]); // Ambil tanggalnya aja
+                    const incomeData = data.map(d => d.income);
+                    const expenseData = data.map(d => d.expense);
+
+                    // Hancurkan chart lama jika ada (biar gak numpuk saat refresh)
+                    if (this.chartInstance) {
+                        this.chartInstance.destroy();
+                    }
+
+                    this.chartInstance = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [
+                                {
+                                    label: 'Pemasukan',
+                                    data: incomeData,
+                                    borderColor: '#16a34a', // Green
+                                    backgroundColor: 'rgba(22, 163, 74, 0.1)',
+                                    tension: 0.3,
+                                    fill: true
+                                },
+                                {
+                                    label: 'Pengeluaran',
+                                    data: expenseData,
+                                    borderColor: '#dc2626', // Red
+                                    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+                                    tension: 0.3,
+                                    fill: true
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'top' }
+                            },
+                            scales: {
+                                y: { beginAtZero: true }
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    </script>
+</body>
+</html>

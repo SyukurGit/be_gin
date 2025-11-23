@@ -1,9 +1,10 @@
 package middleware
 
 import (
+	"backend-gin/utils" // Pastikan sesuai nama module di go.mod
 	"net/http"
 	"strings"
-	"backend-gin/utils" // Pastikan sesuai nama module di go.mod
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -23,7 +24,7 @@ func JwtAuthMiddleware() gin.HandlerFunc {
 
 		// Cek validitas token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			return utils.API_SECRET, nil
+			return utils.ApiSecret(), nil
 		})
 
 		if err != nil || !token.Valid {

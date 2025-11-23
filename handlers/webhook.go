@@ -5,20 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os" // PENTING: Kita butuh 'os' untuk membaca file .env
 	"strconv"
 	"strings"
 	"backend-gin/database"
 	"backend-gin/models"
 	"github.com/gin-gonic/gin"
-	// "github.com/dustin/go-humanize" // Opsional: Biar angka ada titiknya (Rp 50.000)
 )
 
-// ⚠️ GANTI DENGAN TOKEN BOT KAMU YANG ASLI
-const BOT_TOKEN = "8575911688:AAGMWG9TKJd2Lz6Lvf2aI7TMLQlkFIpOgmI"
+// Catatan: Konstanta BOT_TOKEN sudah dihapus dari sini agar aman.
+// Token sekarang diambil langsung dari Environment Variable.
 
 type TelegramResponse struct {
-	ChatID int64  `json:"chat_id"`
-	Text   string `json:"text"`
+	ChatID    int64  `json:"chat_id"`
+	Text      string `json:"text"`
 	ParseMode string `json:"parse_mode"` // Supaya bisa pakai huruf tebal (Bold)
 }
 
@@ -40,7 +40,7 @@ func TelegramWebhook(c *gin.Context) {
 	text := payload.Message.Text
 	chatID := payload.Message.Chat.ID
 
-	// --- LOGIKA BARU: CEK PERINTAH ---
+	// --- LOGIKA CEK PERINTAH ---
 
 	// 1. Fitur Cek Saldo
 	if text == "/saldo" || text == "/summary" || text == "cek" {
@@ -61,7 +61,7 @@ func TelegramWebhook(c *gin.Context) {
 		return
 	}
 
-	// 3. Logika Transaksi (+/-) yang Lama
+	// 3. Logika Transaksi (+/-)
 	parts := strings.Fields(text)
 	if len(parts) < 2 {
 		sendReply(chatID, "⚠️ Format salah! Ketik `/help` untuk bantuan.")
@@ -128,7 +128,10 @@ func handleCekSaldo(chatID int64) {
 }
 
 func sendReply(chatID int64, text string) {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", BOT_TOKEN)
+	// PENTING: Mengambil token dari Environment Variable (.env)
+	token := os.Getenv("TELEGRAM_BOT_TOKEN") 
+	
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
 	
 	msg := TelegramResponse{
 		ChatID:    chatID,
