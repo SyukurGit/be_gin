@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"backend-gin/utils" // Pastikan sesuai nama module di go.mod
+	"backend-gin/utils"
 	"net/http"
 	"strings"
 
@@ -11,7 +11,6 @@ import (
 
 func JwtAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Ambil token dari Header: "Authorization: Bearer <token>"
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Butuh token akses!"})
@@ -19,10 +18,8 @@ func JwtAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Buang kata "Bearer " supaya sisa tokennya saja
 		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
 
-		// Cek validitas token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			return utils.ApiSecret(), nil
 		})
@@ -33,6 +30,17 @@ func JwtAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		c.Next() // Lanjut masuk ke dalam
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			// Simpan User ID
+			if userIDFloat, ok := claims["user_id"].(float64); ok {
+				c.Set("user_id", uint(userIDFloat))
+			}
+			// BARU: Simpan Role (admin/user)
+			if role, ok := claims["role"].(string); ok {
+				c.Set("role", role)
+			}
+		}
+
+		c.Next()
 	}
 }

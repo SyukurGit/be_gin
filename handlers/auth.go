@@ -21,39 +21,45 @@ func Login(c *gin.Context) {
 	}
 
 	var user models.User
-	// Cari user di database
 	if err := database.DB.Where("username = ?", input.Username).First(&user).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Username atau password salah"})
 		return
 	}
 
-	// Cek Password (Hash vs Input)
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Username atau password salah"})
 		return
 	}
 
-	// Bikin Token
-	token, _ := utils.GenerateToken(user.ID)
-	c.JSON(http.StatusOK, gin.H{"token": token})
+	// UPDATE: Masukkan role user ke dalam token
+	token, _ := utils.GenerateToken(user.ID, user.Role)
+	
+	// Kirim balik data user juga (biar frontend tahu dia admin/bukan)
+	c.JSON(http.StatusOK, gin.H{
+		"token": token,
+		"role": user.Role, 
+		"username": user.Username,
+	})
 }
 
-// Fungsi sementara buat daftarin admin pertama kali
 func RegisterAdmin(c *gin.Context) {
-	// 1. Hash Password
 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
 	
-	user := models.User{Username: "admin", Password: string(hashedPassword)}
+	// Ganti dengan ID Telegram ASLI kamu
+	user := models.User{
+		Username:   "admin",
+		Password:   string(hashedPassword),
+		Role:       "admin", 
+		TelegramID: 5321617875, 
+	}
 	
-	// 2. Simpan dengan Error Checking
 	if err := database.DB.Create(&user).Error; err != nil {
-		// Jika gagal (misal: user sudah ada), beri tahu errornya!
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Gagal membuat admin. Kemungkinan username 'admin' sudah ada.",
+			"error": "Gagal membuat admin.",
 			"detail": err.Error(),
 		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Admin berhasil dibuat!"})
+	c.JSON(http.StatusOK, gin.H{"message": "Super Admin berhasil dibuat!"})
 }

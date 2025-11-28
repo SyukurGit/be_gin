@@ -38,105 +38,83 @@ func TelegramWebhook(c *gin.Context) {
 	text := payload.Message.Text
 	chatID := payload.Message.Chat.ID
 
-	// --- 🔒 KEAMANAN ---
-	const MyTelegramID int64 = 5321617875 // Ganti dengan ID Kamu
-	if chatID != MyTelegramID {
-		c.JSON(http.StatusOK, gin.H{"status": "ignored_unauthorized"})
+	// --- 🔒 LOGIKA MULTI-USER DYNAMIS ---
+	// Cek apakah Telegram ID ini terdaftar di tabel Users?
+	var user models.User
+	if err := database.DB.Where("telegram_id = ?", chatID).First(&user).Error; err != nil {
+		// Jika tidak ketemu di DB -> Tolak (Silent Block)
+		// User asing tidak akan bisa pakai bot ini
+		c.JSON(http.StatusOK, gin.H{"status": "ignored_unregistered"})
 		return
 	}
 
-	// ===========================
-	//   LOGIKA PERINTAH (COMMANDS)
-	// ===========================
+	// --- LOGIKA PERINTAH (COMMANDS) ---
 
-	// 1. FITUR DELETE - LANGKAH 1 (Preview)
-	// Format: /del 26
+	// 1. FITUR DELETE - Langkah 1
 	if strings.HasPrefix(text, "/del ") {
 		idStr := strings.TrimPrefix(text, "/del ")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			sendReply(chatID, "⚠️ ID harus angka. Contoh: `/del 26`")
-			c.JSON(http.StatusOK, gin.H{"status": "error"})
+			sendReply(chatID, "⚠️ ID harus angka.")
 			return
 		}
 
 		var trx models.Transaction
-		if err := database.DB.First(&trx, id).Error; err != nil {
-			sendReply(chatID, fmt.Sprintf("❌ Data ID %d tidak ditemukan.", id))
-			c.JSON(http.StatusOK, gin.H{"status": "not_found"})
+		// Pastikan user hanya bisa hapus data MILIKNYA SENDIRI
+		if err := database.DB.Where("id = ? AND user_id = ?", id, user.ID).First(&trx).Error; err != nil {
+			sendReply(chatID, "❌ Data tidak ditemukan atau bukan milikmu.")
 			return
 		}
 
-		// Preview Data
-		preview := fmt.Sprintf("⚠️ *KONFIRMASI HAPUS*\n\nID: %d\nKet: %s\nJml: %d\n\nKlik ini untuk menghapus permanen:", trx.ID, trx.Category, trx.Amount)
-		
-		// FIX: Format disamakan jadi /yakinhapus106 (tanpa underscore)
-		confirmCmd := fmt.Sprintf("/yakinhapus%d", trx.ID) 
-		
-		sendReply(chatID, preview+"\n"+confirmCmd)
+		confirmCmd := fmt.Sprintf("/yakinhapus%d", trx.ID)
+		preview := fmt.Sprintf("⚠️ *KONFIRMASI HAPUS*\n\nKet: %s\nJml: %d\n\nKlik: %s", trx.Category, trx.Amount, confirmCmd)
+		sendReply(chatID, preview)
 		c.JSON(http.StatusOK, gin.H{"status": "confirming"})
 		return
 	}
 
-	// 2. FITUR DELETE - LANGKAH 2 (Eksekusi Hapus)
-	// Format: /yakinhapus106 (Sesuai log chat kamu)
+	// 2. FITUR DELETE - Langkah 2
 	if strings.HasPrefix(text, "/yakinhapus") {
-		// Ambil angka dibelakang "/yakinhapus"
 		idStr := strings.TrimPrefix(text, "/yakinhapus")
 		id, _ := strconv.Atoi(idStr)
 
-		// DELETE DATABASE
-		result := database.DB.Delete(&models.Transaction{}, id)
+		// Hapus hanya jika milik user ini
+		result := database.DB.Where("id = ? AND user_id = ?", id, user.ID).Delete(&models.Transaction{})
 
-		if result.Error != nil {
-			sendReply(chatID, "❌ Gagal menghapus database.")
-		} else if result.RowsAffected == 0 {
-			sendReply(chatID, "⚠️ Data tersebut sudah tidak ada.")
+		if result.RowsAffected == 0 {
+			sendReply(chatID, "⚠️ Gagal hapus (Data hilang/bukan milikmu).")
 		} else {
-			// FIX: Memberikan pesan sukses dengan ID yang dihapus
-			sendReply(chatID, fmt.Sprintf("✅ Sukses! Data ID %d berhasil dihapus permanen.", id))
+			sendReply(chatID, "✅ Terhapus.")
 		}
-		
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 		return
 	}
 
-	// 3. FITUR SALDO
+	// 3. FITUR SALDO (Per User)
 	if text == "/saldo" || text == "/summary" || text == "cek" {
-		handleCekSaldo(chatID)
+		handleCekSaldo(chatID, user.ID) // Kirim UserID
 		c.JSON(http.StatusOK, gin.H{"status": "replied"})
 		return
 	}
 
-	// 4. FITUR BANTUAN
+	// 4. BANTUAN
 	if text == "/start" || text == "/help" {
-		sendHelpMessage(chatID)
+		pesan := fmt.Sprintf("Halo %s! 🤖\nBot siap mencatat keuanganmu.\nID Terdaftar: %d", user.Username, user.TelegramID)
+		sendReply(chatID, pesan)
 		c.JSON(http.StatusOK, gin.H{"status": "replied"})
 		return
 	}
 
-	// ===========================
-	//   LOGIKA TRANSAKSI (+/-)
-	// ===========================
-
-	// Cek apakah pesan dimulai dengan '+' atau '-'
+	// --- LOGIKA TRANSAKSI ---
 	isTransaction := strings.HasPrefix(text, "+") || strings.HasPrefix(text, "-")
-
-	// JIKA BUKAN TRANSAKSI DAN BUKAN COMMAND DI ATAS
 	if !isTransaction {
-		pesanError := "⚠️ Perintah tidak dikenali.\nLihat panduan di bawah ini:"
-		sendReply(chatID, pesanError)
-		sendHelpMessage(chatID)
-		c.JSON(http.StatusOK, gin.H{"status": "unknown_input"})
+		sendReply(chatID, "⚠️ Perintah tidak dikenali. Ketik /help")
 		return
 	}
 
-	// Jika sampai sini, berarti depannya '+' atau '-'
 	parts := strings.Fields(text)
-	
 	if len(parts) < 2 {
-		sendReply(chatID, "⚠️ Format kurang lengkap!\n\nJangan lupa kategorinya.\nContoh: `+50000 Gaji`")
-		c.JSON(http.StatusOK, gin.H{"status": "format_incomplete"})
+		sendReply(chatID, "⚠️ Format: `+50000 Gaji`")
 		return
 	}
 
@@ -144,44 +122,36 @@ func TelegramWebhook(c *gin.Context) {
 	tipe := ""
 	if strings.HasPrefix(nominalStr, "+") {
 		tipe = "income"
-	} else if strings.HasPrefix(nominalStr, "-") {
+	} else {
 		tipe = "expense"
 	}
 
 	cleanNominal := strings.TrimPrefix(strings.TrimPrefix(nominalStr, "+"), "-")
-	amount, err := strconv.Atoi(cleanNominal)
-	if err != nil {
-		sendReply(chatID, "⚠️ Nominal harus angka!")
-		return
-	}
+	amount, _ := strconv.Atoi(cleanNominal)
 
 	trx := models.Transaction{
+		UserID:   user.ID, // PENTING: Link ke User yang sedang chat
 		Amount:   amount,
 		Type:     tipe,
 		Category: parts[1],
 		Note:     strings.Join(parts[2:], " "),
 	}
 	
-	if err := database.DB.Create(&trx).Error; err != nil {
-		sendReply(chatID, "❌ Gagal menyimpan ke database.")
-		return
-	}
+	database.DB.Create(&trx)
 
 	icon := "Dn"
-	if tipe == "income" {
-		icon = "UP"
-	}
+	if tipe == "income" { icon = "UP" }
 	
-	pesan := fmt.Sprintf("✅ *Tersimpan! (ID: %d)*\n\n%s Rp %d\n📂 %s", trx.ID, icon, amount, parts[1])
+	pesan := fmt.Sprintf("✅ *Tersimpan!*\nID: %d\n%s Rp %d\n📂 %s", trx.ID, icon, amount, parts[1])
 	sendReply(chatID, pesan)
-
 	c.JSON(http.StatusOK, gin.H{"status": "saved"})
 }
 
-// Helper: Menghitung Saldo
-func handleCekSaldo(chatID int64) {
+// Update: Terima parameter UserID untuk filter
+func handleCekSaldo(chatID int64, userID uint) {
 	var trx []models.Transaction
-	database.DB.Find(&trx)
+	// Hanya ambil data milik user ini
+	database.DB.Where("user_id = ?", userID).Find(&trx)
 
 	var income, expense int
 	for _, t := range trx {
@@ -191,38 +161,14 @@ func handleCekSaldo(chatID int64) {
 			expense += t.Amount
 		}
 	}
-	balance := income - expense
-
-	pesan := fmt.Sprintf("📊 *Laporan Keuangan*\n\n"+
-		"Total Pemasukan: Rp %d\n"+
-		"Total Pengeluaran: Rp %d\n"+
-		"--------------------------\n"+
-		"💰 *Saldo: Rp %d*", income, expense, balance)
 	
-	sendReply(chatID, pesan)
+	sendReply(chatID, fmt.Sprintf("💰 Saldo Kamu: Rp %d\n(Masuk: %d, Keluar: %d)", income-expense, income, expense))
 }
 
-// Helper: Kirim Pesan Bantuan
-func sendHelpMessage(chatID int64) {
-	pesan := "🤖 *Panduan Bot Keuangan*\n\n" +
-		"• `+50000 Gaji` (Pemasukan)\n" +
-		"• `-20000 Makan` (Pengeluaran)\n" +
-		"• `/del <ID>` (Hapus Data)\n" +
-		"• /saldo (Cek Laporan)\n" +         // <— newline DI SINI WAJIB
-		"• /yakinhapusid (hapus final tanpa konfirmasi)"
-
-	sendReply(chatID, pesan)
-}
-
-// Helper: Kirim Balasan ke Telegram
 func sendReply(chatID int64, text string) {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
-	msg := TelegramResponse{
-		ChatID:    chatID,
-		Text:      text,
-		ParseMode: "Markdown",
-	}
+	msg := TelegramResponse{ChatID: chatID, Text: text, ParseMode: "Markdown"}
 	body, _ := json.Marshal(msg)
 	http.Post(url, "application/json", bytes.NewBuffer(body))
 }

@@ -7,7 +7,7 @@ import (
 	"backend-gin/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/gin-contrib/cors" // <--- 1. JANGAN LUPA IMPORT INI
+	"github.com/gin-contrib/cors"
 )
 
 func main() {
@@ -20,27 +20,37 @@ func main() {
 
 	r := gin.Default()
 
-	// 2. PASANG CORS DI SINI
-	// Ini yang bikin HTML kamu boleh ambil data
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
-	config.AllowHeaders = []string{
-"Origin", "Content-Length", "Content-Type", "Authorization", "ngrok-skip-browser-warning", }
+	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", "ngrok-skip-browser-warning"}
 	r.Use(cors.New(config))
 
-	// Route
+	// Public Routes
 	r.POST("/login", handlers.Login)
 	r.POST("/register-admin", handlers.RegisterAdmin)
 	r.POST("/telegram/webhook", handlers.TelegramWebhook)
 
+	// Protected Routes (Butuh Token)
 	api := r.Group("/api")
 	api.Use(middleware.JwtAuthMiddleware())
 	{
-		// 3. DAFTARKAN ROUTE BARU INI
+		// Fitur User Biasa
 		api.GET("/transactions", handlers.GetTransactions)
 		api.GET("/summary", handlers.GetSummary)
-		api.GET("/chart/daily", handlers.GetDailyChart)      // Baru
-		api.GET("/categories", handlers.GetCategorySummary)  // Baru
+		api.GET("/chart/daily", handlers.GetDailyChart)
+		api.GET("/categories", handlers.GetCategorySummary)
+
+		// Fitur Super Admin (BARU)
+		// Aksesnya nanti: POST /api/admin/users
+		admin := api.Group("/admin")
+		{
+			admin.GET("/users", handlers.GetAllUsers)      // Lihat semua user
+			admin.POST("/users", handlers.CreateUser)      // Tambah user baru
+			admin.DELETE("/users/:id", handlers.DeleteUser) // Hapus user
+
+			admin.GET("/users/:id/stats", handlers.GetUserStats) // Get Detail
+    admin.PUT("/users/:id", handlers.UpdateUser)         // Edit User
+		}
 	}
 
 	r.Run(":8080")
