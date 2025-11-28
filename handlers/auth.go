@@ -40,10 +40,20 @@ func Login(c *gin.Context) {
 
 // Fungsi sementara buat daftarin admin pertama kali
 func RegisterAdmin(c *gin.Context) {
-	// Hash password "admin123" (bisa diganti)
+	// 1. Hash Password
 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
 	
 	user := models.User{Username: "admin", Password: string(hashedPassword)}
-	database.DB.Create(&user)
+	
+	// 2. Simpan dengan Error Checking
+	if err := database.DB.Create(&user).Error; err != nil {
+		// Jika gagal (misal: user sudah ada), beri tahu errornya!
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Gagal membuat admin. Kemungkinan username 'admin' sudah ada.",
+			"detail": err.Error(),
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Admin berhasil dibuat!"})
 }

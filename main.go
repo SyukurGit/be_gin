@@ -24,7 +24,8 @@ func main() {
 	// Ini yang bikin HTML kamu boleh ambil data
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
-	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	config.AllowHeaders = []string{
+"Origin", "Content-Length", "Content-Type", "Authorization", "ngrok-skip-browser-warning", }
 	r.Use(cors.New(config))
 
 	// Route
